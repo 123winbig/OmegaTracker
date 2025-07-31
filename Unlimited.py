@@ -16,40 +16,34 @@ POCKET_GROUPS = {
     10: [9, 22, 18], 11: [29, 7, 28], 12: [12, 35, 3, 26]
 }
 
+STAKE_PROGRESSIONS = [1, 1, 2, 2, 3, 4, 5, 5, 8]
+
 class OmegaTracker:
-    def __init__(self, bankroll):
+    def __init__(self, bankroll, unit_value):
         self.spin_history = []
         self.frequency = defaultdict(int)
         self.miss_count = {i: 0 for i in range(37)}
         self.bankroll = bankroll
+        self.unit_value = unit_value
         self.predicted_last = None
+        self.progress_step = 0
 
     def add_spin(self, number):
         if not 0 <= number <= 36:
-            return f"❌ Invalid spin: {number} — only 0–36 allowed."
+            return f"❌ Invalid spin: {number}"
         self.spin_history.append(number)
         self.frequency[number] += 1
         for i in range(37):
             self.miss_count[i] += 1
         self.miss_count[number] = 0
 
-        # Auto bankroll update if predicted hit
+        # Bankroll update on win
         if self.predicted_last and number == self.predicted_last:
-            win_amt = self.bankroll * 0.2
+            win_amt = self.unit_value * STAKE_PROGRESSIONS[self.progress_step] * 36
             self.bankroll += win_amt
-
-    def average_jump(self):
-        if len(self.spin_history) < 2:
-            return 0
-        jumps = []
-        for i in range(1, len(self.spin_history)):
-            try:
-                idx1 = WHEEL_ORDER.index(self.spin_history[i - 1])
-                idx2 = WHEEL_ORDER.index(self.spin_history[i])
-                jumps.append(abs(idx2 - idx1))
-            except ValueError:
-                continue
-        return round(sum(jumps) / len(jumps), 2) if jumps else 0
+            self.progress_step = 0
+        elif self.progress_step < len(STAKE_PROGRESSIONS) - 1:
+            self.progress_step += 1
 
     def kaprekar_seed(self):
         if len(self.spin_history) < 4:
@@ -65,80 +59,95 @@ class OmegaTracker:
         return num % 12 + 1
 
     def score_pockets(self):
-        scores = {}
-        for i in range(37):
-            scores[i] = self.frequency[i] * 2 + self.miss_count[i]
-        return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return sorted(
+            {i: self.frequency[i] * 2 + self.miss_count[i] for i in range(37)}.items(),
+            key=lambda x: x[1], reverse=True
+        )
 
     def reason(self, pocket):
-        f = self.frequency[pocket]
-        m = self.miss_count[pocket]
-        if f > 0 and m < 5: return "🔥 Hot and recently hit"
-        if f == 0 and m > 20: return "❄️ Very cold and overdue"
-        if f > 1: return "📈 Consistently active"
-        return "🧠 Strategic pattern match"
+        f, m = self.frequency[pocket], self.miss_count[pocket]
+        if f > 0 and m < 5: return "🔥 Hot & recently hit"
+        if f == 0 and m > 20: return "❄️ Cold & overdue"
+        if f > 1: return "📈 Active trend"
+        return "🧠 Pattern match"
+
+    def average_jump(self):
+        if len(self.spin_history) < 2:
+            return 0
+        jumps = []
+        for i in range(1, len(self.spin_history)):
+            try:
+                idx1 = WHEEL_ORDER.index(self.spin_history[i - 1])
+                idx2 = WHEEL_ORDER.index(self.spin_history[i])
+                jumps.append(abs(idx2 - idx1))
+            except ValueError:
+                continue
+        return round(sum(jumps) / len(jumps), 2) if jumps else 0
 
     def predict(self):
         if len(self.spin_history) < 12:
             return "⚠️ Need 12+ spins for prediction"
-        ranked = self.score_pockets()
-        best = ranked[0][0]
-        self.predicted_last = best  # store for win check
-        group = self.kaprekar_seed()
-        backup = next((i for i in POCKET_GROUPS[group] if i != best), None) if group else None
+        best = self.score_pockets()[0][0]
+        self.predicted_last = best
+        group_id = self.kaprekar_seed()
+        group = POCKET_GROUPS.get(group_id, [])
+        if best in group:
+            idx = group.index(best)
+            display = f"[{group[idx - 1]}] <{best}> [{group[idx + 1]}]" if 0 < idx < len(group)-1 else str(group)
+        else:
+            display = str(group)
+        backup = next((i for i in group if i != best), None)
+        stake_units = STAKE_PROGRESSIONS[self.progress_step]
+        stake_amount = self.unit_value * stake_units
         return {
             "Best Bet": best,
-            "1NB Backup": backup,
+            "1NB Group": display,
+            "Backup": backup,
             "Reason Best": self.reason(best),
-            "Reason 1NB": self.reason(backup) if backup is not None else "Derived from spin seed logic",
+            "Reason Backup": self.reason(backup),
             "Avg Jump": self.average_jump(),
-            "Stake Advice": self.stake(best)
+            "Stake Advice": f"💸 Step {self.progress_step+1}/9: Stake €{stake_amount:.2f}"
         }
-
-    def stake(self, key):
-        score = self.frequency[key] * 2 + self.miss_count[key]
-        if score > 25: return f"💰 High confidence – stake up to €{self.bankroll * 0.2:.2f}"
-        if score > 15: return f"⚖️ Medium confidence – stake up to €{self.bankroll * 0.1:.2f}"
-        return f"⚠️ Low confidence – stake max €{self.bankroll * 0.05:.2f}"
 
     def top_hot(self): return sorted(self.frequency.items(), key=lambda x: x[1], reverse=True)[:5]
     def top_cold(self): return sorted(self.miss_count.items(), key=lambda x: x[1], reverse=True)[:5]
 
-# 🔷 Streamlit Interface
-st.set_page_config("OmegaTracker v2.2", "🎰")
-st.title("🎰 OmegaTracker v2.2 — Strategic Roulette Tracker")
+# Streamlit UI
+st.set_page_config("OmegaTracker v2.3", "🎰")
+st.title("🎰 OmegaTracker v2.3 — Precision Roulette Companion")
 
-bankroll = st.number_input("💰 Enter your starting bankroll", min_value=10, step=10)
-tracker = OmegaTracker(bankroll)
+bankroll = st.number_input("💰 Starting Bankroll (€)", min_value=10.0, step=10.0)
+unit_value = st.number_input("🔢 Base Stake Unit (€)", min_value=1.0, step=1.0)
+tracker = OmegaTracker(bankroll, unit_value)
 
-spin_input = st.text_input("🎲 Enter spin results (comma-separated):")
+spin_input = st.text_input("🎲 Enter spin results (comma or space-separated):")
 if spin_input:
     try:
-        spins = [int(s.strip()) for s in spin_input.split(",")]
+        cleaned = spin_input.replace(",", " ").split()
+        spins = [int(s.strip()) for s in cleaned]
         for s in spins:
             msg = tracker.add_spin(s)
             if msg:
                 st.warning(msg)
     except:
-        st.error("Invalid format — enter numbers between 0–36, separated by commas.")
+        st.error("❌ Invalid format — enter numbers 0–36 using commas or spaces.")
 
-# 🔮 Predictions
 if len(tracker.spin_history) >= 12:
-    st.subheader("🧠 Tactical Prediction")
+    st.subheader("🔮 Tactical Prediction")
     prediction = tracker.predict()
     if isinstance(prediction, str):
         st.info(prediction)
     else:
         st.success(f"🎯 Best Bet: {prediction['Best Bet']} — {prediction['Reason Best']}")
-        st.info(f"⚡ 1NB Backup: {prediction['1NB Backup']} — {prediction['Reason 1NB']}")
-        st.write(f"🔁 Avg Wheel Jump Distance: {prediction['Avg Jump']}")
-        st.write(f"💰 {prediction['Stake Advice']}")
+        st.info(f"⚡ 1NB Backup: {prediction['Backup']} — {prediction['Reason Backup']}")
+        st.write(f"🧠 Group Display: {prediction['1NB Group']}")
+        st.write(f"🔁 Avg Wheel Jump: {prediction['Avg Jump']}")
+        st.write(f"{prediction['Stake Advice']}")
         st.write(f"📈 Updated Bankroll: €{round(tracker.bankroll, 2)}")
 
-# 📊 Key Stats
 if tracker.spin_history:
     st.subheader("📊 Pocket Activity")
     hot = tracker.top_hot()
     cold = tracker.top_cold()
-    st.write("🔥 Top 5 Hot Pockets:", {num: f"{freq}x" for num, freq in hot})
-    st.write("❄️ Top 5 Cold Pockets:", {num: f"Missed {miss} spins" for num, miss in cold})
+    st.write("🔥 Hot Pockets:", {num: f"{freq}x" for num, freq in hot})
+    st.write("❄️ Cold P
