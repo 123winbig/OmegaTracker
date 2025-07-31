@@ -1,48 +1,40 @@
 import streamlit as st
-from collections import Counter, defaultdict
+from collections import Counter
 
-# 🧠 Init session state
+# ⚙️ Setup
 if 'history' not in st.session_state:
     st.session_state['history'] = []
-if 'bets' not in st.session_state:
-    st.session_state['bets'] = []
+if 'miss_tracker' not in st.session_state:
+    st.session_state['miss_tracker'] = {}
 
-# 🎰 App Title
-st.title("🎯 OmegaTracker v1.4: Rule the Wheel")
+# 🎰 UI Title
+st.title("🎯 OmegaTracker v1.5 - Tactical Betting Mode")
 
-# 🔄 Spin Entry
-st.subheader("📥 Enter Spin Outcome")
-new_spin = st.text_input("Latest Spin (number or color)", key="spin_input")
-
-if st.button("Add Spin") and new_spin:
+# ➕ Enter Spin
+new_spin = st.text_input("Enter Spin Outcome")
+if st.button("Submit Spin") and new_spin:
     st.session_state['history'].append(new_spin)
-    st.success(f"Spin '{new_spin}' added!")
+    
+    # 🧠 Update miss tracker
+    for outcome in st.session_state['miss_tracker']:
+        st.session_state['miss_tracker'][outcome] += 1
+    if new_spin not in st.session_state['miss_tracker']:
+        st.session_state['miss_tracker'][new_spin] = 0
+    else:
+        st.session_state['miss_tracker'][new_spin] = 0
+    st.success("Spin added.")
 
-st.write(f"🧮 Spins Entered: {len(st.session_state['history'])}")
-st.write("📜 History:", st.session_state['history'])
-
-# ⏳ Gate: wait for 12 spins
+# ⏳ Wait for 12 spins
 if len(st.session_state['history']) < 12:
-    st.warning("⏳ Enter at least 12 spins to activate predictions and tracking.")
+    st.warning("⏳ Enter 12+ spins to activate prediction engine.")
     st.stop()
 
-# 🧮 Frequency Analysis
-def get_predictions(history):
-    freq = Counter(history)
-    most_common = freq.most_common(3)
-    prediction = most_common[0][0]
-    confidence = freq[prediction] / len(history)
-    return prediction, confidence, freq
+# 🔮 Prediction Engine
+freq = Counter(st.session_state['history'])
+predicted = freq.most_common(1)[0][0]
+conf_score = freq[predicted] / len(st.session_state['history'])
+miss_count = st.session_state['miss_tracker'].get(predicted, 0)
 
-# 📉 Miss Count Tracker
-def get_miss_counts(history):
-    last_seen = {}
-    for idx, val in enumerate(reversed(history)):
-        if val not in last_seen:
-            last_seen[val] = idx + 1
-    return last_seen
-
-# 💸 Stake Suggestion Engine
 def suggest_stake(confidence, base=1.0):
     if confidence > 0.4:
         return round(base * 2, 2)
@@ -51,33 +43,10 @@ def suggest_stake(confidence, base=1.0):
     else:
         return round(base, 2)
 
-# 🔮 Prediction + UI Display
-prediction, confidence, freq = get_predictions(st.session_state['history'])
-stake = suggest_stake(confidence)
-miss = get_miss_counts(st.session_state['history'])
+stake = suggest_stake(conf_score)
 
-st.subheader("🔮 Prediction Engine")
-st.success(f"Bet Recommendation: **{prediction}**")
-st.info(f"Confidence Score: {confidence:.2f}")
-st.info(f"Suggested Stake: 💰 {stake} units")
-
-# 🗺️ Wheel Layout Heatmap (simple placeholder)
-st.subheader("🗺️ Wheel Layout")
-st.write(freq)
-
-# 📉 Miss Counts
-st.subheader("📉 Missed Outcomes")
-st.write(miss)
-
-# ➕ Log Bet
-if st.button("Log Bet"):
-    st.session_state['bets'].append({
-        "bet": prediction,
-        "stake": stake,
-        "confidence": confidence
-    })
-    st.success("Bet logged!")
-
-# 🧾 Bet History
-st.subheader("🔁 Bet History")
-st.write(st.session_state['bets'])
+# 📊 Tactical Output
+st.subheader("🎯 Tactical Prediction")
+st.metric(label="Predicted Outcome", value=predicted)
+st.metric(label="Missed Count", value=f"{miss_count} spins")
+st.metric(label="Suggested Stake", value=f"💰 {stake} units")
