@@ -1,90 +1,121 @@
+# omega_tracker_v2.py
+
 import streamlit as st
-from collections import Counter
+from collections import defaultdict
 
-# 🎲 Roulette Column Mapping
-def get_column(number):
-    col1 = {1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34}
-    col2 = {2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35}
-    col3 = {3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36}
+# European roulette wheel sequence (physical layout)
+WHEEL_ORDER = [
+    0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36,
+    11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9,
+    22, 18, 29, 7, 28, 12, 35, 3, 26
+]
+
+class OmegaTracker:
+    def __init__(self, bankroll):
+        self.spin_history = []
+        self.bankroll = bankroll
+        self.frequency = defaultdict(int)
+        self.miss_count = {i: 0 for i in range(37)}
+
+    def add_spin(self, number):
+        if not 0 <= number <= 36:
+            return f"❌ Invalid input: {number}. Only numbers 0–36 allowed."
+        self.spin_history.append(number)
+        self.frequency[number] += 1
+        for i in range(37):
+            self.miss_count[i] += 1
+        self.miss_count[number] = 0
+
+    def physical_jump_distance(self):
+        if len(self.spin_history) < 2:
+            return 0
+        jumps = []
+        for i in range(1, len(self.spin_history)):
+            prev = self.spin_history[i - 1]
+            curr = self.spin_history[i]
+            try:
+                index_prev = WHEEL_ORDER.index(prev)
+                index_curr = WHEEL_ORDER.index(curr)
+                jump = abs(index_curr - index_prev)
+                jumps.append(jump)
+            except ValueError:
+                continue
+        return round(sum(jumps) / len(jumps), 2) if jumps else 0
+
+    def score_pockets(self):
+        scores = {}
+        for i in range(37):
+            freq = self.frequency[i]
+            miss = self.miss_count[i]
+            scores[i] = freq * 2 + miss
+        return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    def predict(self):
+        if len(self.spin_history) < 12:
+            return "⚠️ Not enough spins. Enter at least 12 to unlock predictions."
+        ranked = self.score_pockets()
+        best, backup = ranked[0], ranked[1]
+        avg_jump = self.physical_jump_distance()
+        return {
+            "Best Bet": best[0],
+            "1NB Backup": backup[0],
+            "Reason Best": f"Hit {self.frequency[best[0]]}x, missed {self.miss_count[best[0]]} spins",
+            "Reason 1NB": f"Hit {self.frequency[backup[0]]}x, missed {self.miss_count[backup[0]]} spins",
+            "Avg Jump Distance": avg_jump,
+            "Stake Advice": self.stake_advice(best[1])
+        }
+
+    def stake_advice(self, score):
+        if score > 25:
+            return f"🔥 High confidence — bet up to {self.bankroll * 0.2:.2f}"
+        elif score > 15:
+            return f"⚡ Medium confidence — bet up to {self.bankroll * 0.1:.2f}"
+        else:
+            return f"🧊 Low confidence — bet max {self.bankroll * 0.05:.2f}"
+
+# 🎯 Streamlit Interface
+st.set_page_config(page_title="OmegaTracker v2.0", page_icon="🎰")
+st.title("🎲 OmegaTracker v2.0 – Intelligent Roulette Assistant")
+
+# Bankroll input
+bankroll = st.number_input("💰 Enter your bankroll (€):", min_value=10, step=10)
+tracker = OmegaTracker(bankroll)
+
+# Spin input field
+spin_input = st.text_input("🎯 Enter spin results (comma-separated, e.g., 5,16,23):")
+
+# Process spin entries
+if spin_input:
     try:
-        n = int(number)
-    except:
-        return None
-    if n in col1:
-        return 1
-    elif n in col2:
-        return 2
-    elif n in col3:
-        return 3
-    return None
+        numbers = [int(num.strip()) for num in spin_input.split(",")]
+        for num in numbers:
+            result = tracker.add_spin(num)
+            if result:
+                st.warning(result)
+    except Exception:
+        st.error("❌ Please enter valid numbers separated by commas.")
 
-# ⚙️ Setup State
-if 'history' not in st.session_state:
-    st.session_state['history'] = []
-if 'miss_tracker' not in st.session_state:
-    st.session_state['miss_tracker'] = {}
+# Show statistics
+if tracker.spin_history:
+    st.subheader("📊 Pocket Statistics")
+    st.write(f"Total Spins: {len(tracker.spin_history)}")
+    st.write(f"Average Physical Jump Distance: {tracker.physical_jump_distance()}")
 
-# 🎰 UI Title
-st.title("🎯 OmegaTracker v1.6 - Column-Aware Tactical Betting")
+    with st.expander("🔍 Frequency & Miss Count"):
+        freq = {i: tracker.frequency[i] for i in range(37) if tracker.frequency[i] > 0}
+        miss = {i: tracker.miss_count[i] for i in range(37)}
+        st.write("🟢 Frequency:", freq)
+        st.write("🔴 Miss Count:", miss)
 
-# ➕ Spin Entry
-new_spin = st.text_input("Enter Spin Outcome (1–36)")
-if st.button("Submit Spin") and new_spin:
-    st.session_state['history'].append(new_spin)
-
-    # 🧠 Update Miss Tracker
-    for outcome in st.session_state['miss_tracker']:
-        st.session_state['miss_tracker'][outcome] += 1
-    if new_spin not in st.session_state['miss_tracker']:
-        st.session_state['miss_tracker'][new_spin] = 0
+    # Show predictions
+    st.subheader("🔮 Predictions")
+    prediction = tracker.predict()
+    if isinstance(prediction, str):
+        st.info(prediction)
     else:
-        st.session_state['miss_tracker'][new_spin] = 0
-
-    st.success(f"Spin '{new_spin}' logged.")
-
-# ⏳ Hold Until 12 Spins
-total_spins = len(st.session_state['history'])
-if total_spins < 12:
-    st.warning("⏳ Prediction engine activates after 12 spins.")
-    st.stop()
-
-# 🔄 Column Progression Analysis
-column_sequence = [get_column(s) for s in st.session_state['history'] if get_column(s) is not None]
-column_moves = []
-for i in range(1, len(column_sequence)):
-    move = column_sequence[i] - column_sequence[i-1]
-    column_moves.append(move)
-
-avg_move = round(sum(column_moves) / len(column_moves), 2) if column_moves else 0
-
-# 🎯 Prediction Logic
-freq = Counter(st.session_state['history'])
-predicted = freq.most_common(1)[0][0]
-conf_score = freq[predicted] / total_spins
-miss_count = st.session_state['miss_tracker'].get(predicted, 0)
-
-# 💰 Stake Suggestion
-def suggest_stake(confidence, base=1.0):
-    if confidence > 0.4:
-        return round(base * 2, 2)
-    elif confidence > 0.3:
-        return round(base * 1.5, 2)
-    else:
-        return round(base, 2)
-
-stake = suggest_stake(conf_score)
-
-# 📊 Tactical Output
-st.subheader("🧠 Tactical Prediction")
-st.metric(label="Predicted Outcome", value=predicted)
-st.metric(label="Missed Count", value=f"{miss_count} spins")
-st.metric(label="Suggested Stake", value=f"{stake} units")
-
-# 🧠 Display Column Intelligence
-st.subheader("📐 Column Strategy Engine")
-st.metric(label="Avg Column Movement", value=f"{avg_move}")
-st.write(f"Column Sequence: {column_sequence}")
-st.write(f"Column Transitions: {column_moves}")
-
-# 🧪 Auto-Switch Logic (coming soon!)
-# At 24 or 36 spins, we could shift weighting from frequency to column patterning. Placeholder for now.
+        st.success(f"Best Bet: 🎯 {prediction['Best Bet']}")
+        st.write(f"1NB Backup: ⚡ {prediction['1NB Backup']}")
+        st.write(f"Reason: {prediction['Reason Best']}")
+        st.write(f"1NB Reason: {prediction['Reason 1NB']}")
+        st.write(f"Avg Jump Distance: 🔁 {prediction['Avg Jump Distance']}")
+        st.write(f"Stake Advice: 💰 {prediction['Stake Advice']}")
