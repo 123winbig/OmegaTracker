@@ -1,2 +1,2 @@
-streamlit run Unlimited.py
+streamlit
 pandas
