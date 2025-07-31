@@ -150,4 +150,4 @@ if tracker.spin_history:
     hot = tracker.top_hot()
     cold = tracker.top_cold()
     st.write("🔥 Hot Pockets:", {num: f"{freq}x" for num, freq in hot})
-    st.write("❄️ Cold P
+    st.write("❄️ Cold Pockets:", {num: f"Missed {miss} spins" for num, miss in cold})
