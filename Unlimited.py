@@ -1,105 +1,83 @@
 import streamlit as st
-import random
-import pandas as pd
+from collections import Counter, defaultdict
 
-# ----- REALISTIC EUROPEAN WHEEL LAYOUT -----
-wheel_layout = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 
-                6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 
-                24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 
-                29, 7, 28, 12, 35, 3, 26]
+# 🧠 Init session state
+if 'history' not in st.session_state:
+    st.session_state['history'] = []
+if 'bets' not in st.session_state:
+    st.session_state['bets'] = []
 
-# ----- INITIAL STATE -----
-if "history" not in st.session_state:
-    st.session_state["history"] = []
-if "balance" not in st.session_state:
-    st.session_state["balance"] = 100
+# 🎰 App Title
+st.title("🎯 OmegaTracker v1.4: Rule the Wheel")
 
-base_stake = 1
-history = st.session_state["history"]
-balance = st.session_state["balance"]
+# 🔄 Spin Entry
+st.subheader("📥 Enter Spin Outcome")
+new_spin = st.text_input("Latest Spin (number or color)", key="spin_input")
 
-# ----- NEIGHBOR DETECTION -----
-def get_neighbors(number):
-    if number not in wheel_layout:
-        return []
-    index = wheel_layout.index(number)
-    left = wheel_layout[(index - 1) % len(wheel_layout)]
-    right = wheel_layout[(index + 1) % len(wheel_layout)]
-    return [left, right]
+if st.button("Add Spin") and new_spin:
+    st.session_state['history'].append(new_spin)
+    st.success(f"Spin '{new_spin}' added!")
 
-# ----- HOT NUMBER DETECTION -----
-def get_hot(spins, n=5):
-    return pd.Series(spins).value_counts().head(n).index.tolist()
+st.write(f"🧮 Spins Entered: {len(st.session_state['history'])}")
+st.write("📜 History:", st.session_state['history'])
 
-# ----- ECHO ZONE (Recent Repeats) -----
-def get_echo_zone(spins, n=6):
-    recent = spins[-n:]
-    return [num for num in set(recent) if recent.count(num) > 1]
+# ⏳ Gate: wait for 12 spins
+if len(st.session_state['history']) < 12:
+    st.warning("⏳ Enter at least 12 spins to activate predictions and tracking.")
+    st.stop()
 
-# ----- PREDICTION ENGINE -----
-def get_predictions(spins):
-    hot = get_hot(spins)
-    echo = get_echo_zone(spins)
-    neighbors = [nbr for spin in spins[-3:] for nbr in get_neighbors(spin)]
+# 🧮 Frequency Analysis
+def get_predictions(history):
+    freq = Counter(history)
+    most_common = freq.most_common(3)
+    prediction = most_common[0][0]
+    confidence = freq[prediction] / len(history)
+    return prediction, confidence, freq
 
-    counts = {}
-    for num in hot:
-        counts[num] = counts.get(num, 0) + 3
-    for num in neighbors:
-        counts[num] = counts.get(num, 0) + 2
-    for num in echo:
-        counts[num] = counts.get(num, 0) + 1
+# 📉 Miss Count Tracker
+def get_miss_counts(history):
+    last_seen = {}
+    for idx, val in enumerate(reversed(history)):
+        if val not in last_seen:
+            last_seen[val] = idx + 1
+    return last_seen
 
-    return [{"number": num, "weight": wt} for num, wt in counts.items()]
-
-# ----- STAKE SCALING -----
-def recommend_stake(predictions):
-    total_weight = sum(p["weight"] for p in predictions)
-    max_weight = len(predictions) * 3
-    confidence = total_weight / max_weight if max_weight else 0
-
-    if confidence <= 0.3:
-        stake = base_stake
-    elif confidence <= 0.6:
-        stake = base_stake * 2
-    elif confidence <= 0.9:
-        stake = base_stake * 3
+# 💸 Stake Suggestion Engine
+def suggest_stake(confidence, base=1.0):
+    if confidence > 0.4:
+        return round(base * 2, 2)
+    elif confidence > 0.3:
+        return round(base * 1.5, 2)
     else:
-        stake = base_stake * 5
+        return round(base, 2)
 
-    return round(confidence * 100, 1), stake
+# 🔮 Prediction + UI Display
+prediction, confidence, freq = get_predictions(st.session_state['history'])
+stake = suggest_stake(confidence)
+miss = get_miss_counts(st.session_state['history'])
 
-# ----- STREAMLIT INTERFACE -----
-st.title("🎡 OmegaTracker v1.2")
-st.subheader("European Wheel + Smart Prediction + Real-Time Strategy")
+st.subheader("🔮 Prediction Engine")
+st.success(f"Bet Recommendation: **{prediction}**")
+st.info(f"Confidence Score: {confidence:.2f}")
+st.info(f"Suggested Stake: 💰 {stake} units")
 
-st.number_input("💰 Starting Balance", value=balance, step=1, key="balance")
+# 🗺️ Wheel Layout Heatmap (simple placeholder)
+st.subheader("🗺️ Wheel Layout")
+st.write(freq)
 
-if st.button("🎲 Spin Wheel"):
-    spin = random.choice(wheel_layout)
-    history.append(spin)
-    st.session_state["history"] = history
-    st.write(f"🎯 Spin Result: **{spin}**")
+# 📉 Miss Counts
+st.subheader("📉 Missed Outcomes")
+st.write(miss)
 
-    if len(history) >= 12:
-        predictions = get_predictions(history)
-        confidence, stake = recommend_stake(predictions)
-
-        st.metric("📊 Prediction Confidence", f"{confidence}%")
-        st.metric("💵 Suggested Stake", f"€{stake}")
-
-        pred_df = pd.DataFrame(predictions)
-        st.dataframe(pred_df)
-
-        st.line_chart(pd.Series([balance + (stake if spin in pred_df['number'].values else -stake)
-                                 for spin in history]))
-    else:
-        st.info("🔍 Spin at least 12 times to activate predictions.")
-
-# ----- SESSION EXPORT -----
-if st.button("📁 Export Session"):
-    df = pd.DataFrame({
-        "Spin #": list(range(1, len(history) + 1)),
-        "Result": history
+# ➕ Log Bet
+if st.button("Log Bet"):
+    st.session_state['bets'].append({
+        "bet": prediction,
+        "stake": stake,
+        "confidence": confidence
     })
-    st.download_button("📥 Download CSV", df.to_csv(index=False), "omega_session.csv", "text/csv")
+    st.success("Bet logged!")
+
+# 🧾 Bet History
+st.subheader("🔁 Bet History")
+st.write(st.session_state['bets'])
