@@ -3,23 +3,28 @@ from collections import Counter
 
 class OmegaSystemUnlimited:
     def __init__(self, bankroll):
-        self.bankroll = bankroll
+        self.original_bankroll = bankroll
         self.unit_bank = bankroll
         self.spins = []
         self.session_max = 108
         self.bet_progression = [1, 1, 1, 2, 2, 3, 4, 5, 9]
         self.bet_stage = 0
         self.kaprekar_groups = self.generate_kaprekar_groups()
+        self.last_result = None
+        self.last_prediction = []
 
     def reset_session(self):
         self.spins = []
         self.bet_stage = 0
-        self.unit_bank = self.bankroll
+        self.unit_bank = self.original_bankroll
+        self.last_result = None
+        self.last_prediction = []
 
     def add_spin(self, number):
         self.spins.append(number)
         if len(self.spins) >= self.session_max:
             self.reset_session()
+        self.auto_bet()
 
     def get_hot_pockets(self):
         if len(self.spins) < 13:
@@ -76,30 +81,37 @@ class OmegaSystemUnlimited:
             return overlap
         return hot[:3] + kaprekar[:2]
 
-    def place_bet(self, chosen_numbers):
+    def auto_bet(self):
+        chosen_numbers = self.final_prediction()
+        self.last_prediction = chosen_numbers
         units_this_bet = len(chosen_numbers) * self.bet_progression[self.bet_stage]
         self.unit_bank -= units_this_bet
 
         last_spin = self.spins[-1] if self.spins else None
+        self.last_result = "LOSS"
         if last_spin in chosen_numbers:
             winnings = 36 * self.bet_progression[self.bet_stage]
             self.unit_bank += winnings
-
-        self.bet_stage = min(self.bet_stage + 1, len(self.bet_progression) - 1)
+            self.bet_stage = 0
+            self.last_result = "WIN"
+        else:
+            self.bet_stage = min(self.bet_stage + 1, len(self.bet_progression) - 1)
 
     def get_dashboard(self):
         return {
             "Bank Units": self.unit_bank,
+            "Current Bet Stage": self.bet_progression[self.bet_stage],
             "Hot Pocket Prediction": self.get_hot_pockets(),
             "Kaprekar Prediction": self.get_kaprekar_prediction(),
-            "Final Prediction": self.final_prediction(),
-            "Current Bet Stage": self.bet_progression[self.bet_stage],
+            "Final Prediction Used": self.last_prediction,
+            "Last Spin Result": self.spins[-1] if self.spins else None,
+            "Outcome": self.last_result,
             "Spin Count": len(self.spins)
         }
 
+# STREAMLIT UI
+st.title("🎰 Omega System UNLIMITED - Autopilot Edition")
 
-# STREAMLIT INTERFACE
-st.title("🎰 Omega System UNLIMITED")
 if "system" not in st.session_state:
     bankroll = st.number_input("Enter your bankroll (units):", min_value=1, step=1)
     if bankroll:
@@ -110,10 +122,7 @@ system = st.session_state.get("system")
 spin_input = st.number_input("Enter spin result:", min_value=0, max_value=36, step=1)
 if st.button("Add Spin"):
     system.add_spin(spin_input)
-
-chosen_numbers = st.multiselect("Choose numbers to bet on:", list(range(0, 37)))
-if st.button("Place Bet"):
-    system.place_bet(chosen_numbers)
+    st.success("Spin processed and bet placed automatically.")
 
 dashboard = system.get_dashboard()
 st.subheader("📊 Dashboard")
