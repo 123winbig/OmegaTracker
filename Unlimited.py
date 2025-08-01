@@ -1,6 +1,17 @@
 import streamlit as st
 from collections import Counter
 
+ROULETTE_LAYOUT = [
+    0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36,
+    11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31,
+    9, 22, 18, 29, 7, 28, 12, 35, 3, 26
+]
+
+WHEEL_GROUPS = {
+    "Left Half": ROULETTE_LAYOUT[:19],
+    "Right Half": ROULETTE_LAYOUT[19:]
+}
+
 class OmegaSystemUnlimited:
     def __init__(self, bankroll):
         self.original_bankroll = bankroll
@@ -9,7 +20,6 @@ class OmegaSystemUnlimited:
         self.session_max = 108
         self.bet_progression = [1, 1, 1, 2, 2, 3, 4, 5, 9]
         self.bet_stage = 0
-        self.kaprekar_groups = self.generate_kaprekar_groups()
         self.last_result = None
         self.last_prediction = []
 
@@ -30,8 +40,12 @@ class OmegaSystemUnlimited:
         if len(self.spins) < 13:
             return []
         data = self.spins[12:105]
-        counts = Counter(data)
-        return [num for num, _ in counts.most_common(5)]
+        wheel_counts = {num: 0 for num in ROULETTE_LAYOUT}
+        for spin in data:
+            if spin in wheel_counts:
+                wheel_counts[spin] += 1
+        sorted_counts = sorted(wheel_counts.items(), key=lambda x: x[1], reverse=True)
+        return [num for num, _ in sorted_counts[:5]]
 
     def kaprekar_step(self, num_str):
         asc = ''.join(sorted(num_str))
@@ -52,26 +66,19 @@ class OmegaSystemUnlimited:
             steps += 1
         return num_str if num_str == '6174' else None
 
-    def generate_kaprekar_groups(self):
-        return {
-            i: list(range(1 + (i - 1) * 4, 1 + i * 4)) for i in range(1, 10)
-        }
-
     def get_kaprekar_prediction(self):
-        seeds = []
+        left_hits = 0
+        right_hits = 0
         for spin in self.spins[:12]:
             seed = self.get_kaprekar_seed(str(spin).zfill(4))
             if seed:
-                seeds.append(seed)
-
-        group_hits = Counter()
-        for i in range(1, int(min(len(self.spins), 105)/12)+1):
-            spins_slice = self.spins[(i - 1) * 12: i * 12]
-            for group_id, group_nums in self.kaprekar_groups.items():
-                group_hits[group_id] += sum(1 for n in spins_slice if n in group_nums)
-
-        top_groups = [gid for gid, _ in group_hits.most_common(3)]
-        return [num for gid in top_groups for num in self.kaprekar_groups[gid]]
+                num = spin
+                if num in WHEEL_GROUPS["Left Half"]:
+                    left_hits += 1
+                elif num in WHEEL_GROUPS["Right Half"]:
+                    right_hits += 1
+        dominant = "Left Half" if left_hits >= right_hits else "Right Half"
+        return WHEEL_GROUPS[dominant][:5]
 
     def final_prediction(self):
         hot = self.get_hot_pockets()
@@ -110,7 +117,7 @@ class OmegaSystemUnlimited:
         }
 
 # STREAMLIT UI
-st.title("🎰 Omega System UNLIMITED - Autopilot Edition")
+st.title("🎰 Omega System UNLIMITED - Wheel-Aware Edition")
 
 if "system" not in st.session_state:
     bankroll = st.number_input("Enter your bankroll (units):", min_value=1, step=1)
