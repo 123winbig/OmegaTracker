@@ -1,84 +1,125 @@
 import streamlit as st
-from collections import defaultdict
+from collections import Counter
 
-WHEEL_ORDER = [
-    0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6,
-    27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16,
-    33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28,
-    12, 35, 3, 26
-]
+class OmegaSystemUnlimited:
+    def __init__(self, bankroll):
+        self.bankroll = bankroll
+        self.unit_bank = bankroll
+        self.spins = []
+        self.session_max = 108
+        self.bet_progression = [1, 1, 1, 2, 2, 3, 4, 5, 9]
+        self.bet_stage = 0
+        self.kaprekar_groups = self.generate_kaprekar_groups()
 
-class OmegaTracker:
-    def __init__(self):
-        self.spin_history = []
-        self.progression = [1, 2, 3, 4]  # stakes per pocket
-        self.current_step = 0
-        self.bankroll = 0
-        self.total_bet_units = 0
+    def reset_session(self):
+        self.spins = []
+        self.bet_stage = 0
+        self.unit_bank = self.bankroll
 
-    def get_neighbors(self, number):
-        idx = WHEEL_ORDER.index(number)
-        left = WHEEL_ORDER[(idx - 1) % len(WHEEL_ORDER)]
-        right = WHEEL_ORDER[(idx + 1) % len(WHEEL_ORDER)]
-        return left, right
+    def add_spin(self, number):
+        self.spins.append(number)
+        if len(self.spins) >= self.session_max:
+            self.reset_session()
 
-    def best_bet(self):
-        return WHEEL_ORDER[len(self.spin_history) % len(WHEEL_ORDER)]
+    def get_hot_pockets(self):
+        if len(self.spins) < 13:
+            return []
+        data = self.spins[12:105]
+        counts = Counter(data)
+        return [num for num, _ in counts.most_common(5)]
 
-    def backup_bet(self):
-        if len(self.spin_history) >= 2:
-            src = self.spin_history[-2]
-        else:
-            src = WHEEL_ORDER[7]
-        return src
+    def kaprekar_step(self, num_str):
+        asc = ''.join(sorted(num_str))
+        desc = ''.join(sorted(num_str, reverse=True))
+        return str(int(desc) - int(asc)).zfill(4)
 
-    def get_bet_spread(self, center):
-        left, right = self.get_neighbors(center)
-        return [left, center, right]
+    def is_kaprekar_valid(self, num_str):
+        return num_str not in ['1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999']
 
-    def add_spin(self, result):
-        self.spin_history.append(result)
-        stake = self.progression[self.current_step]
-        primary = self.get_bet_spread(self.best_bet())
-        backup = self.get_bet_spread(self.backup_bet())
-        all_pockets = primary + backup
-        total_bet = stake * 6
-        self.total_bet_units += total_bet
+    def get_kaprekar_seed(self, num_str):
+        steps = 0
+        seen = set()
+        while num_str != '6174' and steps < 6:
+            num_str = self.kaprekar_step(num_str)
+            if num_str in seen or not self.is_kaprekar_valid(num_str):
+                return None
+            seen.add(num_str)
+            steps += 1
+        return num_str if num_str == '6174' else None
 
-        # Hit detection
-        hits = []
-        if result in primary:
-            hits.append('Primary')
-        if result in backup and result not in primary:
-            hits.append('Backup')
+    def generate_kaprekar_groups(self):
+        return {
+            i: list(range(1 + (i - 1) * 4, 1 + i * 4)) for i in range(1, 10)
+        }
 
-        payout = len(hits) * stake * 36
-        net_result = payout - total_bet
-        self.bankroll += net_result
+    def get_kaprekar_prediction(self):
+        seeds = []
+        for spin in self.spins[:12]:
+            seed = self.get_kaprekar_seed(str(spin).zfill(4))
+            if seed:
+                seeds.append(seed)
 
-        # Progression reset if any hit
-        if hits:
-            self.current_step = 0
-            print(f"✅ HIT in {' & '.join(hits)} → +€{payout} | Net: €{net_result}")
-        else:
-            self.current_step = min(self.current_step + 1, len(self.progression) - 1)
-            print(f"❌ Miss → Loss: €{total_bet} | Progression → Step {self.current_step}")
+        group_hits = Counter()
+        for i in range(1, int(min(len(self.spins), 105)/12)+1):
+            spins_slice = self.spins[(i - 1) * 12: i * 12]
+            for group_id, group_nums in self.kaprekar_groups.items():
+                group_hits[group_id] += sum(1 for n in spins_slice if n in group_nums)
 
-        print(f"💰 Bankroll: €{self.bankroll} | Total Units Bet: {self.total_bet_units}\n")
+        top_groups = [gid for gid, _ in group_hits.most_common(3)]
+        return [num for gid in top_groups for num in self.kaprekar_groups[gid]]
 
-    def show_next_bet(self):
-        stake = self.progression[self.current_step]
-        primary = self.get_bet_spread(self.best_bet())
-        backup = self.get_bet_spread(self.backup_bet())
-        print(f"🎯 Next Bets:")
-        print(f"🔹 Primary Spread → {primary}")
-        print(f"🔸 Backup Spread → {backup}")
-        print(f"🧾 Stake: €{stake} × 6 pockets → €{stake * 6}\n")
+    def final_prediction(self):
+        hot = self.get_hot_pockets()
+        kaprekar = self.get_kaprekar_prediction()
+        overlap = list(set(hot) & set(kaprekar))
+        if overlap:
+            return overlap
+        return hot[:3] + kaprekar[:2]
 
-# 🔥 Demo
-tracker = OmegaTracker()
-tracker.show_next_bet()
-tracker.add_spin(28)
-tracker.show_next_bet()
-tracker.add_spin(2)
-tracker.show_next_bet()
+    def place_bet(self, chosen_numbers):
+        units_this_bet = len(chosen_numbers) * self.bet_progression[self.bet_stage]
+        self.unit_bank -= units_this_bet
+
+        last_spin = self.spins[-1] if self.spins else None
+        if last_spin in chosen_numbers:
+            winnings = 36 * self.bet_progression[self.bet_stage]
+            self.unit_bank += winnings
+
+        self.bet_stage = min(self.bet_stage + 1, len(self.bet_progression) - 1)
+
+    def get_dashboard(self):
+        return {
+            "Bank Units": self.unit_bank,
+            "Hot Pocket Prediction": self.get_hot_pockets(),
+            "Kaprekar Prediction": self.get_kaprekar_prediction(),
+            "Final Prediction": self.final_prediction(),
+            "Current Bet Stage": self.bet_progression[self.bet_stage],
+            "Spin Count": len(self.spins)
+        }
+
+
+# STREAMLIT INTERFACE
+st.title("🎰 Omega System UNLIMITED")
+if "system" not in st.session_state:
+    bankroll = st.number_input("Enter your bankroll (units):", min_value=1, step=1)
+    if bankroll:
+        st.session_state.system = OmegaSystemUnlimited(bankroll)
+
+system = st.session_state.get("system")
+
+spin_input = st.number_input("Enter spin result:", min_value=0, max_value=36, step=1)
+if st.button("Add Spin"):
+    system.add_spin(spin_input)
+
+chosen_numbers = st.multiselect("Choose numbers to bet on:", list(range(0, 37)))
+if st.button("Place Bet"):
+    system.place_bet(chosen_numbers)
+
+dashboard = system.get_dashboard()
+st.subheader("📊 Dashboard")
+for k, v in dashboard.items():
+    st.write(f"{k}: {v}")
+
+if st.button("Reset Session"):
+    system.reset_session()
+    st.success("Session reset!")
